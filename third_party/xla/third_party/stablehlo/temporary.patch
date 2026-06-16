@@ -370,6 +370,21 @@ diff --ruN a/stablehlo/stablehlo/dialect/VhloOps.cpp b/stablehlo/stablehlo/diale
  }
  
  }  // namespace vhlo
+diff --ruN a/stablehlo/stablehlo/reference/Ops.cpp b/stablehlo/stablehlo/reference/Ops.cpp
+--- stablehlo/stablehlo/reference/Ops.cpp
++++ stablehlo/stablehlo/reference/Ops.cpp
+@@ -2392,7 +2392,10 @@
+     Region& updateComputation, Process* process, Scope& scope,
+     ArrayRef<ShapedType> resultTypes) {
+   SmallVector<Tensor> results;
+-  for (const auto& input : inputs) results.push_back(input);
++
++  // Copy `inputs` to `results` while making sure that modifying `results` won't
++  // affect `inputs` because SSA values are immutable.
++  for (const auto& input : inputs) results.push_back(input.clone());
+ 
+   Axes updateScatterDims;
+   for (auto d : updates[0].getAxes())
 diff --ruN a/stablehlo/stablehlo/reference/Ops.h b/stablehlo/stablehlo/reference/Ops.h
 --- stablehlo/stablehlo/reference/Ops.h
 +++ stablehlo/stablehlo/reference/Ops.h
@@ -412,6 +427,61 @@ diff --ruN a/stablehlo/stablehlo/reference/Scope.h b/stablehlo/stablehlo/referen
  
   private:
    /// Internal store for mapping from SSA values to runtime `InterpreterValue`
+diff --ruN a/stablehlo/stablehlo/reference/Tensor.cpp b/stablehlo/stablehlo/reference/Tensor.cpp
+--- stablehlo/stablehlo/reference/Tensor.cpp
++++ stablehlo/stablehlo/reference/Tensor.cpp
+@@ -110,6 +110,18 @@
+ 
+ Tensor::Tensor(ShapedType type, AsmResourceBlob blob)
+     : impl_(llvm::makeIntrusiveRefCnt<detail::Buffer>(type, std::move(blob))) {}
++
++Tensor Tensor::clone() const {
++  if (!*this) {
++    return Tensor();
++  }
++
++  // Copying the data of this Tensor into a new `AsmResourceBlob` and then
++  // creating a new Tensor with that blob.
++  AsmResourceBlob blob = mlir::HeapAsmResourceBlob::allocateAndCopyWithAlign(
++      impl_->getData(), alignof(char));
++  return Tensor(getType(), std::move(blob));
++}
+ 
+ Element Tensor::get(const Index& index) const {
+   Type elementType = getType().getElementType();
+diff --ruN a/stablehlo/stablehlo/reference/Tensor.h b/stablehlo/stablehlo/reference/Tensor.h
+--- stablehlo/stablehlo/reference/Tensor.h
++++ stablehlo/stablehlo/reference/Tensor.h
+@@ -85,6 +85,29 @@
+   /// Logical not operator.
+   bool operator!() const { return !impl_; }
+ 
++  /// Allocates new storage and returns a deep-copy of the Tensor.
++  ///
++  /// The need for this function is explained below.
++  ///
++  /// Scenario 1:-
++  ///   Tensor a = b;
++  ///   Here, whenever we modify `a`, `b` also gets modified. This is often
++  ///   unintended by the developer. It happens because we have a default
++  ///   assignment operator in this class (as seen above). And, this operator
++  ///   copies the private member variable `impl_` of type
++  ///   `llvm::IntrusiveRefCntPtr<detail::Buffer>` during assignment, which
++  ///   simply copies the reference pointer of `b` and does not create a new
++  ///   storage for `a`. Both `a` and `b` point to the same data.
++  ///
++  /// To be able to create a Tensor `a` that stores the same data as `b`
++  /// initially, but doesn't end up modifying `b` when it is modified, we need
++  /// to use the clone() method.
++  ///
++  /// Scenario 2 (using clone()):-
++  ///   Tensor a = b.clone();
++  ///   Here, modifying `a` won't affect `b`.
++  Tensor clone() const;
++
+   /// Returns type of the Tensor object.
+   ShapedType getType() const { return impl_->getType(); };
+ 
 diff --ruN a/stablehlo/stablehlo/reference/Value.h b/stablehlo/stablehlo/reference/Value.h
 --- stablehlo/stablehlo/reference/Value.h
 +++ stablehlo/stablehlo/reference/Value.h
@@ -2492,6 +2562,43 @@ diff --ruN a/stablehlo/stablehlo/tests/interpret/chlo/mulhi.mlir b/stablehlo/sta
 +  check.expect_eq_const %result, dense<[15, 1]> : tensor<2xui64>
 +  func.return
 +}
+diff --ruN a/stablehlo/stablehlo/tests/interpret/scatter.mlir b/stablehlo/stablehlo/tests/interpret/scatter.mlir
+--- stablehlo/stablehlo/tests/interpret/scatter.mlir
++++ stablehlo/stablehlo/tests/interpret/scatter.mlir
+@@ -23,6 +23,12 @@
+   check.expect_eq_const %result, dense<[[[1, 2], [5, 6], [7, 8], [7, 8]],
+                                         [[10, 11], [12, 13], [14, 15], [16, 17]],
+                                         [[18, 19], [20, 21], [21, 22], [23, 24]]]> : tensor<3x4x2xi64>
++
++  // Check that `inputs` is not modified.
++  check.expect_eq_const %inputs, dense<[[[1, 2], [3, 4], [5, 6], [7, 8]],
++                                      [[9, 10], [11, 12], [13, 14], [15, 16]],
++                                      [[17, 18], [19, 20], [21, 22], [23, 24]]]> : tensor<3x4x2xi64>
++
+   func.return
+ }
+ 
+@@ -79,5 +85,20 @@
+         [[41, 42], [44, 45], [46, 47], [47, 48]]
+       ]
+   ]> : tensor<2x3x4x2xi64>
++
++  // Check that `inputs` is not modified.
++  check.expect_eq_const %inputs, dense<[
++      [
++        [[1, 2], [3, 4], [5, 6], [7, 8]],
++        [[9, 10], [11, 12], [13, 14], [15, 16]],
++        [[17, 18], [19, 20], [21, 22], [23, 24]]
++      ],
++      [
++        [[25, 26], [27, 28], [29, 30], [31, 32]],
++        [[33, 34], [35, 36], [37, 38], [39, 40]],
++        [[41, 42], [43, 44], [45, 46], [47, 48]]
++      ]
++  ]> : tensor<2x3x4x2xi64>
++
+   func.return
+ }
 diff --ruN a/stablehlo/stablehlo/tests/ops_chlo.mlir b/stablehlo/stablehlo/tests/ops_chlo.mlir
 --- stablehlo/stablehlo/tests/ops_chlo.mlir
 +++ stablehlo/stablehlo/tests/ops_chlo.mlir
