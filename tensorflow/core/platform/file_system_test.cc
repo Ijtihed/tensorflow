@@ -146,21 +146,21 @@ class InterPlanetaryFileSystem : public NullFileSystem {
 
   std::map<std::string, std::set<std::string>> celestial_bodies_ = {
       std::pair<std::string, std::set<std::string>>(
-          "", {"Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn",
+          "", {"Mercury", "Venus", "Earth", "Ceres", "Jupiter", "Saturn",
                "Uranus", "Neptune"}),
       std::pair<std::string, std::set<std::string>>("Mercury", {}),
       std::pair<std::string, std::set<std::string>>("Venus", {}),
       std::pair<std::string, std::set<std::string>>("Earth", {"Moon"}),
-      std::pair<std::string, std::set<std::string>>("Mars", {}),
-      std::pair<std::string, std::set<std::string>>(
-          "Jupiter", {"Europa", "Io", "Ganymede"}),
+      std::pair<std::string, std::set<std::string>>("Ceres", {}),
+      std::pair<std::string, std::set<std::string>>("Jupiter",
+                                                    {"Moon1", "Io", "Moon2"}),
       std::pair<std::string, std::set<std::string>>("Saturn", {}),
       std::pair<std::string, std::set<std::string>>("Uranus", {}),
       std::pair<std::string, std::set<std::string>>("Neptune", {}),
       std::pair<std::string, std::set<std::string>>("Earth/Moon", {}),
-      std::pair<std::string, std::set<std::string>>("Jupiter/Europa", {}),
+      std::pair<std::string, std::set<std::string>>("Jupiter/Moon1", {}),
       std::pair<std::string, std::set<std::string>>("Jupiter/Io", {}),
-      std::pair<std::string, std::set<std::string>>("Jupiter/Ganymede", {})};
+      std::pair<std::string, std::set<std::string>>("Jupiter/Moon2", {})};
 };
 
 // Returns all the matched entries as a comma separated string removing the
@@ -189,13 +189,13 @@ TEST(InterPlanetaryFileSystemTest, IPFSMatch) {
   InterPlanetaryFileSystem ipfs;
   EXPECT_EQ(Match(&ipfs, "thereisnosuchfile"), "");
   EXPECT_EQ(Match(&ipfs, "*"),
-            "Earth,Jupiter,Mars,Mercury,Neptune,Saturn,Uranus,Venus");
+            "Ceres,Earth,Jupiter,Mercury,Neptune,Saturn,Uranus,Venus");
   // Returns Jupiter's moons.
   EXPECT_EQ(Match(&ipfs, "Jupiter/*"),
-            "Jupiter/Europa,Jupiter/Ganymede,Jupiter/Io");
+            "Jupiter/Io,Jupiter/Moon1,Jupiter/Moon2");
   // Returns Jupiter's and Earth's moons.
   EXPECT_EQ(Match(&ipfs, "*/*"),
-            "Earth/Moon,Jupiter/Europa,Jupiter/Ganymede,Jupiter/Io");
+            "Earth/Moon,Jupiter/Io,Jupiter/Moon1,Jupiter/Moon2");
   TF_EXPECT_OK(ipfs.CreateDir(ipfs.JoinPath(kPrefix, "Planet0")));
   TF_EXPECT_OK(ipfs.CreateDir(ipfs.JoinPath(kPrefix, "Planet1")));
   EXPECT_EQ(Match(&ipfs, "Planet[0-1]"), "Planet0,Planet1");
