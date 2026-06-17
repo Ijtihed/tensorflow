@@ -50,6 +50,7 @@ limitations under the License.
 #include "absl/types/span.h"
 #include "xla/tsl/platform/status_macros.h"
 #include "google/protobuf/repeated_ptr_field.h"
+#include "google/protobuf/util/message_differencer.h"
 #include "xla/comparison_util.h"
 #include "xla/error_util.h"
 #include "xla/hlo/ir/backend_config.h"
@@ -85,11 +86,9 @@ limitations under the License.
 #include "xla/side_effect_util.h"
 #include "xla/sort_json.h"
 #include "xla/status_macros.h"
-#include "xla/tsl/concurrency/ref_count.h"
 #include "xla/tsl/lib/gtl/iterator_range.h"
 #include "xla/tsl/lib/gtl/map_util.h"
 #include "xla/tsl/platform/logging.h"  // IWYU pragma: keep
-#include "xla/tsl/platform/statusor.h"
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
 
@@ -620,8 +619,8 @@ absl::StatusOr<std::unique_ptr<HloInstruction>> HloInstruction::CreateFromProto(
       TF_RET_CHECK(proto.operand_ids_size() == 1)
           << "TopK instruction should have exactly 1 operand but has "
           << proto.operand_ids_size();
-      instruction =
-          CreateTopK(shape, all_operands()[0], proto.k(), proto.largest());
+      instruction = CreateTopK(shape, all_operands()[0], proto.k(),
+                               proto.largest(), proto.is_stable());
       break;
     }
     case HloOpcode::kTranspose:
@@ -1476,8 +1475,10 @@ absl::StatusOr<std::unique_ptr<HloInstruction>> HloInstruction::CreateFromProto(
 }
 
 /* static */ std::unique_ptr<HloInstruction> HloInstruction::CreateTopK(
-    const Shape& shape, HloInstruction* input, int64_t k, bool largest) {
-  return std::make_unique<HloTopKInstruction>(shape, input, k, largest);
+    const Shape& shape, HloInstruction* input, int64_t k, bool largest,
+    bool is_stable) {
+  return std::make_unique<HloTopKInstruction>(shape, input, k, largest,
+                                              is_stable);
 }
 
 /* static */ std::unique_ptr<HloInstruction>
